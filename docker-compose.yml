@@ -1,0 +1,127 @@
+version: '2'
+
+services:
+
+    node:
+        build:
+            context: ./node
+            args:
+                - NODE_VERSION=latest
+                - NODE_ENV=development
+                - DEBUG=true
+                - PROJECT_PATH=/opt/app/
+                - BUNDLER=true
+                - BUNDLER_NAME=webpack
+                - YARN=false
+        volumes:
+            - ../:/opt/app
+        entrypoint: run-nodock "node index.js"
+        depends_on:
+            - nginx
+            - mongo
+        networks:
+            - intercontainer
+            - eventbus
+        tty: true
+
+    flask:
+        build:
+            context: ./containers/flask
+            args:
+                # Placeholder for runtime arguments to pass in
+                PROJECT_PATH=/opt/app/flask
+        volumes:
+            - ./containers/flask/src:/opt/app/flask/
+        entrypoint: build-flask "gunicorn -w 4 app:app"
+        networks:
+            - eventbus
+            - intercontainer
+        depends_on:
+            - nginx
+            - rabbitmq
+
+    mongo:
+        build: ./containers/mongo
+        networks:
+            - intercontainer
+            - eventbus
+        expose:
+            - "27017"
+        volumes_from:
+            - volumes
+
+    nginx:
+        build:
+            context: ./containers/nginx
+            args:
+                - WEB_REVERSE_PROXY_PORT=8000
+                - WEB_SSL=false
+                - SELF_SIGNED=false
+                - NO_DEFAULT=false
+                - SERVICE_NAME=productionService
+        volumes_from:
+            - volumes
+        networks:
+            - intercontainer
+            - eventbus
+        ports:
+            - "80:80"
+            - "443:443"
+        depends_on:
+            - certbot
+        tty: true
+
+    certbot:
+        build:
+            context: ./containers/certbot
+        networks:
+            - intercontainer
+        volumes_from:
+            - volumes
+
+    rabbitmq:
+        build:
+            context: ./containers/rabbitmq
+            args:
+                - MANAGEMENT=false
+                - FEDERATION=false
+                - RABBITMQ_DEFAULT_USER=guest
+                - RABBITMQ_DEFAULT_PASS=guest
+        networks:
+            - eventbus
+            - intercontainer
+        expose:
+            - "5672"
+
+    workspace:
+        build:
+            context: ./containers/workspace
+            args:
+                - NODE_VERSION=latest
+                - TZ=UTC
+        networks:
+            - eventbus
+            - admin
+        volumes:
+            - ../:/opt/app
+        volumes_from:
+            - volumes
+
+    volumes:
+        image: tianon/true
+        volumes:
+            - ./containers/certbot/letsencrypt/:/var/www/letsencrypt
+            - ./containers/certbot/certs/:/var/certs
+            - ./containers/mongo/data:/data
+            - ./containers/nginx/data/logs/:/var/log/nginx
+networks:
+  admin:
+    driver: bridge
+
+  eventbus:
+    driver: bridge
+
+  intercontainer:
+    driver: bridge
+
+
